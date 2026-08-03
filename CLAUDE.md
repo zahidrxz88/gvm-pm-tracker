@@ -67,7 +67,7 @@ Everything lives in one Supabase table, `kv_store` (key/value, `value` is
     schedule: [ { id, date: string|null, completed: boolean }, ... ]
   }
   ```
-- `key = 'admin_pin'` → string, default `Admin1234!`
+- `key = 'admin_pin'` → string, default `Gvm@1234`
 - `key = 'user_pin'` → string, default `User1234!`
 
 The dashboard polls Supabase every 10 seconds and merges in changes, so
@@ -80,7 +80,7 @@ real-time push — up to a 10s lag).
   cannot add/edit/delete contracts, cannot see the "Upcoming PM Checks" section.
 - **User** (PIN: `User1234!`): can view + set/change PM check dates. Cannot mark
   a check "Done", cannot add/edit/delete contracts.
-- **Admin** (PIN: `Admin1234!`): full access — add/edit/delete contracts, mark
+- **Admin** (PIN: `Gvm@1234`): full access — add/edit/delete contracts, mark
   checks Done, change either PIN.
 - Role choice is stored in `localStorage` per-device (not shared). PINs are
   stored in Supabase (shared — same PIN for everyone).
