@@ -353,12 +353,12 @@ async function kvGet(key) {
   const data = await res.json();
   return data && data[0] ? data[0].value : null;
 }
-async function kvSet(key, value) {
+async function kvSet(key, value, accessToken) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/kv_store?on_conflict=key`, {
     method: "POST",
     headers: {
       apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      Authorization: `Bearer ${accessToken || SUPABASE_ANON_KEY}`,
       "Content-Type": "application/json",
       Prefer: "resolution=merge-duplicates"
     },
@@ -370,6 +370,146 @@ async function kvSet(key, value) {
   });
   if (!res.ok) throw new Error("kvSet failed: " + res.status);
 }
+
+// ============ AUTH (Supabase GoTrue REST — no SDK, same hand-rolled-fetch pattern as kvGet/kvSet) ============
+const AUTH_SESSION_KEY = "gvm_auth_session";
+function loadStoredSession() {
+  try {
+    const raw = localStorage.getItem(AUTH_SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+function storeSession(session) {
+  try {
+    if (session) localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));else localStorage.removeItem(AUTH_SESSION_KEY);
+  } catch (e) {/* ignore */}
+}
+async function authRequest(path, body) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1${path}`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error_description || data.msg || data.error || data.message || "Request failed");
+  return data;
+}
+const authSignUp = (email, password) => authRequest("/signup", {
+  email,
+  password
+});
+const authSignIn = (email, password) => authRequest("/token?grant_type=password", {
+  email,
+  password
+});
+const authRefresh = refreshToken => authRequest("/token?grant_type=refresh_token", {
+  refresh_token: refreshToken
+});
+async function authSignOut(accessToken) {
+  try {
+    await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${accessToken}`
+      }
+    });
+  } catch (e) {/* best-effort */}
+}
+function sessionFromAuthResponse(data) {
+  if (!data || !data.access_token) return null;
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresAt: Date.now() + (data.expires_in || 3600) * 1000,
+    user: data.user
+  };
+}
+
+// ---------- profiles / activity_log (PostgREST, authenticated as the caller's JWT) ----------
+async function fetchMyProfile(accessToken, userId) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=id,email,role`, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+  if (!res.ok) throw new Error("Could not load profile");
+  const data = await res.json();
+  return data && data[0] ? data[0] : null;
+}
+async function fetchAllProfiles(accessToken) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?select=id,email,role,created_at&order=created_at.asc`, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+  if (!res.ok) throw new Error("Could not load users");
+  return res.json();
+}
+async function updateUserRole(accessToken, userId, role) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`, {
+    method: "PATCH",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Prefer: "return=minimal"
+    },
+    body: JSON.stringify({
+      role
+    })
+  });
+  if (!res.ok) throw new Error("Could not update role");
+}
+async function fetchActivityLog(accessToken) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/activity_log?select=*&order=created_at.desc&limit=300`, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+  if (!res.ok) throw new Error("Could not load activity log");
+  return res.json();
+}
+async function logActivity(accessToken, actorEmail, action, details) {
+  if (!accessToken) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/activity_log`, {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal"
+      },
+      body: JSON.stringify([{
+        actor_email: actorEmail,
+        action,
+        details: details || {}
+      }])
+    });
+  } catch (e) {
+    console.error("activity log failed", e);
+  }
+}
+const ACTIVITY_LABELS = {
+  login: "Logged in",
+  logout: "Logged out",
+  contract_create: "Created contract",
+  contract_edit: "Edited contract",
+  contract_delete: "Deleted contract",
+  pm_date_set: "Set PM check date",
+  pm_check_done: "Marked PM check done",
+  pm_check_undone: "Reopened PM check",
+  role_change: "Changed a user's role"
+};
 
 // ============ tiny icon set (no external icon library needed) ============
 function Icon({
@@ -538,8 +678,6 @@ const emptyForm = {
   endDate: "",
   frequency: "4"
 };
-const DEFAULT_ADMIN_PIN = "Gvm@1234";
-const DEFAULT_USER_PIN = "User1234!";
 const COUNTRIES = ["Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Antigua and Barbuda", "Argentina", "Armenia", "Australia", "Austria", "Azerbaijan", "Bahamas", "Bahrain", "Bangladesh", "Barbados", "Belarus", "Belgium", "Belize", "Benin", "Bhutan", "Bolivia", "Bosnia and Herzegovina", "Botswana", "Brazil", "Brunei", "Bulgaria", "Burkina Faso", "Burundi", "Cabo Verde", "Cambodia", "Cameroon", "Canada", "Central African Republic", "Chad", "Chile", "China", "Colombia", "Comoros", "Congo (Brazzaville)", "Congo (Kinshasa)", "Costa Rica", "Croatia", "Cuba", "Cyprus", "Czechia", "Denmark", "Djibouti", "Dominica", "Dominican Republic", "Ecuador", "Egypt", "El Salvador", "Equatorial Guinea", "Eritrea", "Estonia", "Eswatini", "Ethiopia", "Fiji", "Finland", "France", "Gabon", "Gambia", "Georgia", "Germany", "Ghana", "Greece", "Grenada", "Guatemala", "Guinea", "Guinea-Bissau", "Guyana", "Haiti", "Honduras", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Israel", "Italy", "Ivory Coast", "Jamaica", "Japan", "Jordan", "Kazakhstan", "Kenya", "Kiribati", "Kosovo", "Kuwait", "Kyrgyzstan", "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia", "Libya", "Liechtenstein", "Lithuania", "Luxembourg", "Madagascar", "Malawi", "Malaysia", "Maldives", "Mali", "Malta", "Marshall Islands", "Mauritania", "Mauritius", "Mexico", "Micronesia", "Moldova", "Monaco", "Mongolia", "Montenegro", "Morocco", "Mozambique", "Myanmar", "Namibia", "Nauru", "Nepal", "Netherlands", "New Zealand", "Nicaragua", "Niger", "Nigeria", "North Korea", "North Macedonia", "Norway", "Oman", "Pakistan", "Palau", "Palestine", "Panama", "Papua New Guinea", "Paraguay", "Peru", "Philippines", "Poland", "Portugal", "Qatar", "Romania", "Russia", "Rwanda", "Saint Kitts and Nevis", "Saint Lucia", "Saint Vincent and the Grenadines", "Samoa", "San Marino", "Sao Tome and Principe", "Saudi Arabia", "Senegal", "Serbia", "Seychelles", "Sierra Leone", "Singapore", "Slovakia", "Slovenia", "Solomon Islands", "Somalia", "South Africa", "South Korea", "South Sudan", "Spain", "Sri Lanka", "Sudan", "Suriname", "Sweden", "Switzerland", "Syria", "Taiwan", "Tajikistan", "Tanzania", "Thailand", "Timor-Leste", "Togo", "Tonga", "Trinidad and Tobago", "Tunisia", "Turkey", "Turkmenistan", "Tuvalu", "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom", "United States", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela", "Vietnam", "Yemen", "Zambia", "Zimbabwe"];
 function Dashboard() {
   const [contracts, setContracts] = useState([]);
@@ -548,20 +686,48 @@ function Dashboard() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [fieldErrors, setFieldErrors] = useState({});
-  const [role, setRole] = useState("guest");
-  const [adminPin, setAdminPin] = useState(DEFAULT_ADMIN_PIN);
-  const [userPin, setUserPin] = useState(DEFAULT_USER_PIN);
-  const [loginModalOpen, setLoginModalOpen] = useState(false);
-  const [pendingLoginRole, setPendingLoginRole] = useState(null);
-  const [pinModalOpen, setPinModalOpen] = useState(false);
-  const [pinInput, setPinInput] = useState("");
-  const [pinError, setPinError] = useState("");
-  const [changePinTarget, setChangePinTarget] = useState(null);
-  const [newPin, setNewPin] = useState("");
-  const isAdmin = role === "admin";
-  const isUser = role === "user" || role === "admin";
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
+  const [manageUsersOpen, setManageUsersOpen] = useState(false);
+  const [profiles, setProfiles] = useState([]);
+  const [profilesError, setProfilesError] = useState("");
+  const [activityLogOpen, setActivityLogOpen] = useState(false);
+  const [activityLog, setActivityLog] = useState([]);
+  const [activityLogError, setActivityLogError] = useState("");
+  const role = profile ? profile.role : "guest";
+  const isSuperAdmin = role === "super_admin";
+  const isAdmin = role === "admin" || isSuperAdmin;
+  const isUser = role === "user" || isAdmin;
+  const roleLabel = role.replace("_", " ").toUpperCase();
   const [confirmDelete, setConfirmDelete] = useState(null);
   const lastSyncedRef = useRef("");
+  const sessionRef = useRef(null);
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+
+  const applySession = async rawSession => {
+    setSession(rawSession);
+    storeSession(rawSession);
+    if (!rawSession) {
+      setProfile(null);
+      return;
+    }
+    try {
+      const p = await fetchMyProfile(rawSession.accessToken, rawSession.user.id);
+      setProfile(p);
+    } catch (e) {
+      console.error("load profile failed", e);
+      setProfile(null);
+    }
+  };
 
   // load
   useEffect(() => {
@@ -576,33 +742,45 @@ function Dashboard() {
         console.error("load contracts failed", e);
       }
       try {
-        const r = localStorage.getItem("role");
-        if (r) setRole(r);
-      } catch (e) {/* default to guest */}
-      try {
-        const p = await kvGet("admin_pin");
-        if (p) setAdminPin(p);
-      } catch (e) {/* default pin stays */}
-      try {
-        const up = await kvGet("user_pin");
-        if (up) setUserPin(up);
-      } catch (e) {/* default pin stays */}
+        const stored = loadStoredSession();
+        if (stored) {
+          if (stored.expiresAt - Date.now() > 60000) {
+            await applySession(stored);
+          } else {
+            const refreshed = sessionFromAuthResponse(await authRefresh(stored.refreshToken));
+            if (refreshed) await applySession(refreshed);else storeSession(null);
+          }
+        }
+      } catch (e) {
+        console.error("restore session failed", e);
+        storeSession(null);
+      }
       setLoaded(true);
     })();
   }, []);
+
+  // keep the Supabase session fresh (access tokens expire after ~1h)
   useEffect(() => {
-    if (!loaded) return;
-    try {
-      localStorage.setItem("role", role);
-    } catch (e) {}
-  }, [role, loaded]);
+    if (!session) return;
+    const interval = setInterval(async () => {
+      const current = sessionRef.current;
+      if (!current || current.expiresAt - Date.now() > 5 * 60000) return;
+      try {
+        const refreshed = sessionFromAuthResponse(await authRefresh(current.refreshToken));
+        if (refreshed) await applySession(refreshed);
+      } catch (e) {
+        console.error("refresh session failed", e);
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [session]);
 
   // save contracts
   useEffect(() => {
     if (!loaded) return;
     (async () => {
       try {
-        await kvSet("contracts", contracts);
+        await kvSet("contracts", contracts, sessionRef.current && sessionRef.current.accessToken);
         lastSyncedRef.current = JSON.stringify(contracts);
       } catch (e) {
         console.error("save failed", e);
@@ -673,65 +851,137 @@ function Dashboard() {
           schedule
         };
       }));
+      logActivity(sessionRef.current && sessionRef.current.accessToken, profile.email, "contract_edit", {
+        contractId: editingId,
+        vendor: form.vendor,
+        contractName: form.contractName
+      });
     } else {
+      const newId = uid();
       setContracts(cs => [...cs, {
-        id: uid(),
+        id: newId,
         ...form,
         frequency: Number(form.frequency),
         schedule: buildSlots(form, [])
       }]);
+      logActivity(sessionRef.current && sessionRef.current.accessToken, profile.email, "contract_create", {
+        contractId: newId,
+        vendor: form.vendor,
+        contractName: form.contractName
+      });
     }
     setModalOpen(false);
   };
   const openLogin = () => {
-    setLoginModalOpen(true);
+    setAuthMode("login");
+    setAuthEmail("");
+    setAuthPassword("");
+    setAuthError("");
+    setAuthNotice("");
+    setAuthModalOpen(true);
   };
-  const chooseLoginRole = r => {
-    setPendingLoginRole(r);
-    setLoginModalOpen(false);
-    setPinInput("");
-    setPinError("");
-    setPinModalOpen(true);
+  const closeAuthModal = () => {
+    setAuthModalOpen(false);
+    setAuthBusy(false);
   };
-  const submitPin = () => {
-    const target = pendingLoginRole === "admin" ? adminPin : userPin;
-    if (pinInput === target) {
-      setRole(pendingLoginRole);
-      setPinModalOpen(false);
-      setPendingLoginRole(null);
-      setPinInput("");
-      setPinError("");
-    } else {
-      setPinError("Incorrect PIN.");
-    }
+  const toggleAuthMode = () => {
+    setAuthMode(m => m === "login" ? "signup" : "login");
+    setAuthError("");
+    setAuthNotice("");
   };
-  const logout = () => {
-    setRole("guest");
-  };
-  const saveNewPin = async () => {
-    if (!newPin.trim() || newPin.length < 4) {
-      setPinError("PIN must be at least 4 characters.");
+  const submitAuth = async () => {
+    setAuthError("");
+    setAuthNotice("");
+    if (!authEmail.trim() || !authPassword) {
+      setAuthError("Enter your email and password.");
       return;
     }
+    setAuthBusy(true);
     try {
-      if (changePinTarget === "admin") {
-        setAdminPin(newPin);
-        await kvSet("admin_pin", newPin);
-      } else if (changePinTarget === "user") {
-        setUserPin(newPin);
-        await kvSet("user_pin", newPin);
+      if (authMode === "signup") {
+        const data = await authSignUp(authEmail.trim(), authPassword);
+        const newSession = sessionFromAuthResponse(data);
+        if (newSession) {
+          await applySession(newSession);
+          logActivity(newSession.accessToken, newSession.user.email, "login", {
+            via: "signup"
+          });
+          setAuthModalOpen(false);
+        } else {
+          setAuthNotice("Account created. Check your email to confirm it, then log in.");
+          setAuthMode("login");
+        }
+      } else {
+        const data = await authSignIn(authEmail.trim(), authPassword);
+        const newSession = sessionFromAuthResponse(data);
+        if (newSession) {
+          await applySession(newSession);
+          logActivity(newSession.accessToken, newSession.user.email, "login", {});
+          setAuthModalOpen(false);
+        }
       }
+      setAuthPassword("");
     } catch (e) {
-      console.error("save pin failed", e);
+      setAuthError(e.message || "Something went wrong.");
+    } finally {
+      setAuthBusy(false);
     }
-    setChangePinTarget(null);
-    setNewPin("");
-    setPinError("");
+  };
+  const logout = async () => {
+    const current = sessionRef.current;
+    if (current && profile) {
+      await logActivity(current.accessToken, profile.email, "logout", {});
+      await authSignOut(current.accessToken);
+    }
+    await applySession(null);
+  };
+  const openManageUsers = async () => {
+    setManageUsersOpen(true);
+    setProfilesError("");
+    try {
+      const rows = await fetchAllProfiles(sessionRef.current.accessToken);
+      setProfiles(rows);
+    } catch (e) {
+      setProfilesError(e.message || "Could not load users.");
+    }
+  };
+  const changeUserRole = async (userId, newRole) => {
+    const target = profiles.find(p => p.id === userId);
+    try {
+      await updateUserRole(sessionRef.current.accessToken, userId, newRole);
+      setProfiles(ps => ps.map(p => p.id === userId ? {
+        ...p,
+        role: newRole
+      } : p));
+      logActivity(sessionRef.current.accessToken, profile.email, "role_change", {
+        targetEmail: target && target.email,
+        fromRole: target && target.role,
+        toRole: newRole
+      });
+    } catch (e) {
+      setProfilesError(e.message || "Could not update role.");
+    }
+  };
+  const openActivityLog = async () => {
+    setActivityLogOpen(true);
+    setActivityLogError("");
+    try {
+      const rows = await fetchActivityLog(sessionRef.current.accessToken);
+      setActivityLog(rows);
+    } catch (e) {
+      setActivityLogError(e.message || "Could not load activity log.");
+    }
   };
   const deleteContract = id => {
     if (!isAdmin) return;
+    const target = contracts.find(c => c.id === id);
     setContracts(cs => cs.filter(c => c.id !== id));
     setConfirmDelete(null);
+    logActivity(sessionRef.current && sessionRef.current.accessToken, profile.email, "contract_delete", {
+      contractId: id,
+      vendor: target && target.vendor,
+      contractName: target && target.contractName
+    });
   };
   const setSlotDate = (contractId, slotId, dateStr) => {
     if (!isUser) return;
@@ -742,9 +992,17 @@ function Dashboard() {
         date: dateStr || null
       } : s)
     }));
+    logActivity(sessionRef.current && sessionRef.current.accessToken, profile.email, "pm_date_set", {
+      contractId,
+      slotId,
+      date: dateStr || null
+    });
   };
   const toggleSlotDone = (contractId, slotId) => {
     if (!isAdmin) return;
+    const contract = contracts.find(c => c.id === contractId);
+    const slot = contract && contract.schedule.find(s => s.id === slotId);
+    const willComplete = slot ? !slot.completed : true;
     setContracts(cs => cs.map(c => c.id !== contractId ? c : {
       ...c,
       schedule: c.schedule.map(s => s.id === slotId ? {
@@ -752,6 +1010,10 @@ function Dashboard() {
         completed: !s.completed
       } : s)
     }));
+    logActivity(sessionRef.current && sessionRef.current.accessToken, profile.email, willComplete ? "pm_check_done" : "pm_check_undone", {
+      contractId,
+      slotId
+    });
   };
   const enriched = useMemo(() => contracts.map(c => {
     const schedule = (c.schedule || []).map(s => ({
@@ -891,8 +1153,12 @@ function Dashboard() {
     }
   }, /*#__PURE__*/React.createElement(Shield, {
     size: 12,
-    color: isAdmin ? "#4ADE9C" : isUser ? "#6E9FB0" : "#8B948E"
-  }), role.toUpperCase()), role === "guest" && /*#__PURE__*/React.createElement("button", {
+    color: isSuperAdmin ? "#F5A623" : isAdmin ? "#4ADE9C" : isUser ? "#6E9FB0" : "#8B948E"
+  }), roleLabel), profile && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "#565F5A"
+    }
+  }, profile.email), role === "guest" && /*#__PURE__*/React.createElement("button", {
     onClick: openLogin,
     style: {
       background: "none",
@@ -902,12 +1168,8 @@ function Dashboard() {
       color: "#8B948E",
       fontSize: 13
     }
-  }, "Login"), isAdmin && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      setChangePinTarget("admin");
-      setNewPin("");
-      setPinError("");
-    },
+  }, "Login"), isSuperAdmin && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+    onClick: openManageUsers,
     style: {
       background: "none",
       border: "1px solid #262B27",
@@ -916,12 +1178,8 @@ function Dashboard() {
       color: "#8B948E",
       fontSize: 13
     }
-  }, "Change admin PIN"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      setChangePinTarget("user");
-      setNewPin("");
-      setPinError("");
-    },
+  }, "Manage Users"), /*#__PURE__*/React.createElement("button", {
+    onClick: openActivityLog,
     style: {
       background: "none",
       border: "1px solid #262B27",
@@ -930,7 +1188,7 @@ function Dashboard() {
       color: "#8B948E",
       fontSize: 13
     }
-  }, "Change user PIN")), (role === "user" || role === "admin") && /*#__PURE__*/React.createElement("button", {
+  }, "Activity Log")), profile && /*#__PURE__*/React.createElement("button", {
     onClick: logout,
     style: {
       background: "none",
@@ -1318,8 +1576,8 @@ function Dashboard() {
       padding: "11px 18px",
       fontSize: 16
     }
-  }, "Cancel"))), loginModalOpen && /*#__PURE__*/React.createElement(Modal, {
-    onClose: () => setLoginModalOpen(false),
+  }, "Cancel"))), authModalOpen && /*#__PURE__*/React.createElement(Modal, {
+    onClose: closeAuthModal,
     narrow: true
   }, /*#__PURE__*/React.createElement("h2", {
     style: {
@@ -1327,86 +1585,52 @@ function Dashboard() {
       fontSize: 18,
       fontWeight: 700
     }
-  }, "Login"), /*#__PURE__*/React.createElement("p", {
+  }, authMode === "login" ? "Log in" : "Create an account"), /*#__PURE__*/React.createElement("p", {
     style: {
       color: "#8B948E",
       fontSize: 15,
       margin: "0 0 18px"
     }
-  }, "Choose which access level to log in as."), /*#__PURE__*/React.createElement("div", {
+  }, authMode === "login" ? "Log in to view PM dates, set schedules, or manage contracts." : "New accounts start with view + set-date access. An admin can promote you later."), /*#__PURE__*/React.createElement("div", {
     style: {
-      display: "flex",
-      gap: 10
+      display: "grid",
+      gap: 12
     }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => chooseLoginRole("user"),
-    style: {
-      flex: 1,
-      background: "transparent",
-      color: "#E8ECE9",
-      border: "1px solid #262B27",
-      borderRadius: 8,
-      padding: "14px 0",
-      fontWeight: 600,
-      fontSize: 16
-    }
-  }, "User"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => chooseLoginRole("admin"),
-    style: {
-      flex: 1,
-      background: "transparent",
-      color: "#E8ECE9",
-      border: "1px solid #262B27",
-      borderRadius: 8,
-      padding: "14px 0",
-      fontWeight: 600,
-      fontSize: 16
-    }
-  }, "Admin"))), pinModalOpen && /*#__PURE__*/React.createElement(Modal, {
-    onClose: () => {
-      setPinModalOpen(false);
-      setPendingLoginRole(null);
-    },
-    narrow: true
-  }, /*#__PURE__*/React.createElement("h2", {
-    style: {
-      margin: "0 0 10px",
-      fontSize: 18,
-      fontWeight: 700
-    }
-  }, "Enter ", pendingLoginRole, " PIN"), /*#__PURE__*/React.createElement("p", {
-    style: {
-      color: "#8B948E",
-      fontSize: 15,
-      margin: "0 0 16px"
-    }
-  }, pendingLoginRole === "admin" ? "Admin access lets you add, edit, and delete contracts." : "User access lets you view and set PM schedule dates."), /*#__PURE__*/React.createElement("input", {
-    type: "password",
-    value: pinInput,
-    onChange: e => setPinInput(e.target.value),
-    onKeyDown: e => e.key === "Enter" && submitPin(),
-    placeholder: "PIN",
-    style: {
-      ...inputStyle,
-      letterSpacing: 4,
-      textAlign: "center",
-      fontSize: 20
-    },
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "email",
+    value: authEmail,
+    onChange: e => setAuthEmail(e.target.value),
+    placeholder: "Email",
+    style: inputStyle,
     autoFocus: true
-  }), pinError && /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("input", {
+    type: "password",
+    value: authPassword,
+    onChange: e => setAuthPassword(e.target.value),
+    onKeyDown: e => e.key === "Enter" && submitAuth(),
+    placeholder: "Password",
+    style: inputStyle
+  })), authError && /*#__PURE__*/React.createElement("div", {
     style: {
       color: "#F2545B",
       fontSize: 14,
-      marginTop: 8
+      marginTop: 10
     }
-  }, pinError), /*#__PURE__*/React.createElement("div", {
+  }, authError), authNotice && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: "#4ADE9C",
+      fontSize: 14,
+      marginTop: 10
+    }
+  }, authNotice), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 10,
       marginTop: 18
     }
   }, /*#__PURE__*/React.createElement("button", {
-    onClick: submitPin,
+    onClick: submitAuth,
+    disabled: authBusy,
     style: {
       flex: 1,
       background: "#4ADE9C",
@@ -1415,13 +1639,11 @@ function Dashboard() {
       borderRadius: 8,
       padding: "11px 0",
       fontWeight: 600,
-      fontSize: 16
+      fontSize: 16,
+      opacity: authBusy ? 0.7 : 1
     }
-  }, "Unlock"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      setPinModalOpen(false);
-      setPendingLoginRole(null);
-    },
+  }, authBusy ? "Please wait…" : authMode === "login" ? "Log in" : "Sign up"), /*#__PURE__*/React.createElement("button", {
+    onClick: closeAuthModal,
     style: {
       background: "transparent",
       color: "#8B948E",
@@ -1430,69 +1652,175 @@ function Dashboard() {
       padding: "11px 18px",
       fontSize: 16
     }
-  }, "Cancel"))), changePinTarget && /*#__PURE__*/React.createElement(Modal, {
-    onClose: () => setChangePinTarget(null),
-    narrow: true
+  }, "Cancel")), /*#__PURE__*/React.createElement("button", {
+    onClick: toggleAuthMode,
+    style: {
+      background: "none",
+      border: "none",
+      color: "#6E9FB0",
+      fontSize: 14,
+      marginTop: 16,
+      padding: 0,
+      textDecoration: "underline"
+    }
+  }, authMode === "login" ? "Don't have an account? Sign up" : "Already have an account? Log in")), manageUsersOpen && /*#__PURE__*/React.createElement(Modal, {
+    onClose: () => setManageUsersOpen(false)
   }, /*#__PURE__*/React.createElement("h2", {
     style: {
       margin: "0 0 10px",
       fontSize: 18,
       fontWeight: 700
     }
-  }, "Set a new ", changePinTarget, " PIN"), /*#__PURE__*/React.createElement("p", {
+  }, "Manage Users"), /*#__PURE__*/React.createElement("p", {
     style: {
       color: "#8B948E",
       fontSize: 15,
-      margin: "0 0 16px"
+      margin: "0 0 18px"
     }
-  }, "Anyone with this PIN can log in as ", changePinTarget, " on this dashboard."), /*#__PURE__*/React.createElement("input", {
-    type: "password",
-    value: newPin,
-    onChange: e => setNewPin(e.target.value),
-    onKeyDown: e => e.key === "Enter" && saveNewPin(),
-    placeholder: "New PIN (min 4 characters)",
-    style: {
-      ...inputStyle,
-      letterSpacing: 4,
-      textAlign: "center",
-      fontSize: 20
-    },
-    autoFocus: true
-  }), pinError && /*#__PURE__*/React.createElement("div", {
+  }, "Assign roles. Only you (the super admin) can change anyone's role."), profilesError && /*#__PURE__*/React.createElement("div", {
     style: {
       color: "#F2545B",
       fontSize: 14,
-      marginTop: 8
+      marginBottom: 12
     }
-  }, pinError), /*#__PURE__*/React.createElement("div", {
+  }, profilesError), /*#__PURE__*/React.createElement("div", {
+    className: "scrollbar",
+    style: {
+      display: "grid",
+      gap: 10,
+      maxHeight: 420,
+      overflowY: "auto"
+    }
+  }, profiles.length === 0 && !profilesError && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: "#8B948E",
+      fontSize: 14
+    }
+  }, "Loading…"), profiles.map(p => {
+    const locked = p.role === "super_admin";
+    return /*#__PURE__*/React.createElement("div", {
+      key: p.id,
+      style: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 10,
+        border: "1px solid #1E2320",
+        borderRadius: 8,
+        padding: "10px 12px"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        minWidth: 0
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 14.5,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap"
+      }
+    }, p.email), /*#__PURE__*/React.createElement("div", {
+      className: "mono",
+      style: {
+        fontSize: 12,
+        color: "#8B948E"
+      }
+    }, "Joined ", new Date(p.created_at).toLocaleDateString())), locked ? /*#__PURE__*/React.createElement("span", {
+      className: "mono",
+      style: {
+        fontSize: 12,
+        color: "#F5A623",
+        flexShrink: 0
+      }
+    }, "SUPER ADMIN (YOU)") : /*#__PURE__*/React.createElement("select", {
+      value: p.role,
+      onChange: e => changeUserRole(p.id, e.target.value),
+      style: {
+        ...selectStyle,
+        width: "auto",
+        padding: "6px 8px",
+        fontSize: 14,
+        flexShrink: 0
+      }
+    }, /*#__PURE__*/React.createElement("option", {
+      value: "user"
+    }, "User"), /*#__PURE__*/React.createElement("option", {
+      value: "admin"
+    }, "Admin")));
+  }))), activityLogOpen && /*#__PURE__*/React.createElement(Modal, {
+    onClose: () => setActivityLogOpen(false)
+  }, /*#__PURE__*/React.createElement("h2", {
+    style: {
+      margin: "0 0 10px",
+      fontSize: 18,
+      fontWeight: 700
+    }
+  }, "Activity Log"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: "#8B948E",
+      fontSize: 15,
+      margin: "0 0 18px"
+    }
+  }, "Visible only to you. Most recent first."), activityLogError && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: "#F2545B",
+      fontSize: 14,
+      marginBottom: 12
+    }
+  }, activityLogError), /*#__PURE__*/React.createElement("div", {
+    className: "scrollbar",
+    style: {
+      display: "grid",
+      gap: 8,
+      maxHeight: 460,
+      overflowY: "auto"
+    }
+  }, activityLog.length === 0 && !activityLogError && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: "#8B948E",
+      fontSize: 14
+    }
+  }, "No activity recorded yet."), activityLog.map(entry => /*#__PURE__*/React.createElement("div", {
+    key: entry.id,
+    style: {
+      border: "1px solid #1E2320",
+      borderRadius: 8,
+      padding: "10px 12px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
+      justifyContent: "space-between",
       gap: 10,
-      marginTop: 18
+      fontSize: 13
     }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: saveNewPin,
+  }, /*#__PURE__*/React.createElement("span", {
     style: {
-      flex: 1,
-      background: "#4ADE9C",
-      color: "#0B0E0C",
-      border: "none",
-      borderRadius: 8,
-      padding: "11px 0",
-      fontWeight: 600,
-      fontSize: 16
+      fontWeight: 600
     }
-  }, "Save PIN"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setChangePinTarget(null),
+  }, ACTIVITY_LABELS[entry.action] || entry.action), /*#__PURE__*/React.createElement("span", {
+    className: "mono",
     style: {
-      background: "transparent",
       color: "#8B948E",
-      border: "1px solid #262B27",
-      borderRadius: 8,
-      padding: "11px 18px",
-      fontSize: 16
+      flexShrink: 0
     }
-  }, "Cancel"))));
+  }, new Date(entry.created_at).toLocaleString())), /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: 12,
+      color: "#6E9FB0",
+      marginTop: 4
+    }
+  }, entry.actor_email), entry.details && Object.keys(entry.details).length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: 12,
+      color: "#8B948E",
+      marginTop: 4,
+      wordBreak: "break-word"
+    }
+  }, Object.entries(entry.details).map(([k, v]) => `${k}: ${v}`).join(" · ")))))));
 }
 function StatBox({
   label,

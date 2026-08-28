@@ -67,26 +67,55 @@ Everything lives in one Supabase table, `kv_store` (key/value, `value` is
     schedule: [ { id, date: string|null, completed: boolean }, ... ]
   }
   ```
-- `key = 'admin_pin'` → string, default `Gvm@1234`
-- `key = 'user_pin'` → string, default `User1234!`
 
-The dashboard polls Supabase every 10 seconds and merges in changes, so
+Real accounts and roles live in Supabase's own `auth.users` table plus a
+`profiles` table (`id`, `email`, `role`), and an `activity_log` table holds the
+audit trail. All three (plus their RLS policies and a `handle_new_user`
+trigger) are defined in `setup.sql` — re-run that file in the Supabase SQL
+Editor after pulling changes to it; it's written to be safe to re-run.
+
+The dashboard polls `kv_store` every 10 seconds and merges in changes, so
 multiple people can use the same link and see each other's edits (not
 real-time push — up to a 10s lag).
 
-## Auth model (three tiers, app-level only — NOT real security)
+## Auth model (real accounts via Supabase Auth, roles in Postgres)
 
-- **Guest** (default, no login): view-only. Cannot see PM schedule dates at all,
+There is **no Supabase JS SDK** in this file (would mean either an external
+CDN dependency or inlining a large UMD bundle). Instead, login/signup/logout
+and session refresh are done with hand-rolled `fetch` calls straight to
+Supabase's GoTrue REST endpoints (`/auth/v1/signup`, `/auth/v1/token?grant_type=...`,
+`/auth/v1/logout`) — see the "AUTH" section right after `kvGet`/`kvSet` in
+`index.html`. The session (access/refresh token) is cached in `localStorage`
+under `gvm_auth_session` and silently refreshed before it expires.
+
+- **Guest** (no login): view-only. Cannot see PM schedule dates at all,
   cannot add/edit/delete contracts, cannot see the "Upcoming PM Checks" section.
-- **User** (PIN: `User1234!`): can view + set/change PM check dates. Cannot mark
-  a check "Done", cannot add/edit/delete contracts.
-- **Admin** (PIN: `Gvm@1234`): full access — add/edit/delete contracts, mark
-  checks Done, change either PIN.
-- Role choice is stored in `localStorage` per-device (not shared). PINs are
-  stored in Supabase (shared — same PIN for everyone).
-- **This is a soft gate**, not real auth — anyone with the anon key (visible in
-  the page source) could technically read/write the table directly. Fine for a
-  low-stakes internal tool; would need real backend auth for anything sensitive.
+- **User** (self-signup default): can view + set/change PM check dates. Cannot
+  mark a check "Done", cannot add/edit/delete contracts.
+- **Admin**: full access — add/edit/delete contracts, mark checks Done.
+- **Super admin** (locked to `zahidrxz@gmail.com`, enforced in `setup.sql` via
+  `is_locked_super_admin()` — not just client-side): everything Admin can do,
+  plus the **Manage Users** panel (assign `user`/`admin` roles — only the
+  super admin can do this, enforced by an RLS policy, not just hidden UI) and
+  the **Activity Log** panel (read-only audit trail of logins/logouts,
+  contract changes, PM date/done changes, and role changes — also RLS-gated to
+  super admin only, so the query returns rows for nobody else).
+- Anyone can self-sign-up (email + password) and starts as `user`. The role
+  actually enforced comes from the `profiles.role` column server-side (via
+  RLS), not from client state — this is a real improvement over the old PIN
+  model. **One nuance:** `kv_store` (the contracts blob) is one JSON row, not
+  one row per contract, so Postgres RLS can only gate "authenticated vs. not"
+  on writes to it — it can't itself distinguish "user may set a date" from
+  "admin may delete a contract" within that blob. That finer split is still
+  enforced client-side only (same limitation the old PIN model had). Tightening
+  it further would mean moving contracts to real per-row storage plus RPC
+  functions — don't take that on without asking first.
+- Depending on the Supabase project's Auth settings, "Confirm email" may be
+  required before a freshly-signed-up account can log in — if so, the signup
+  flow shows a "check your email" notice instead of logging them in
+  immediately. If confirmation emails redirect somewhere wrong, check the
+  Auth → URL Configuration "Site URL" in the Supabase dashboard against the
+  Netlify domain.
 
 ## Key business logic worth knowing before touching it
 
