@@ -1451,25 +1451,7 @@ function Dashboard() {
         borderRadius: 5,
         padding: isNext ? "4px 10px" : "3px 8px"
       }
-    }, "UPCOMING"), isAdmin && /*#__PURE__*/React.createElement("button", {
-      onClick: () => toggleSlotDone(item.contractId, item.slotId),
-      title: "Mark complete",
-      style: {
-        marginLeft: "auto",
-        background: "transparent",
-        border: "1px solid #262B27",
-        borderRadius: 6,
-        padding: isNext ? "8px 14px" : "6px 10px",
-        color: "#4ADE9C",
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        fontSize: isNext ? 15 : 14,
-        flexShrink: 0
-      }
-    }, /*#__PURE__*/React.createElement(CheckCircle2, {
-      size: isNext ? 16 : 14
-    }), " Done")), /*#__PURE__*/React.createElement("div", {
+    }, "UPCOMING")), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: isNext ? 22 : 16,
         fontWeight: 700,
