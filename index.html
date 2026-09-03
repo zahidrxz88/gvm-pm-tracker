@@ -1200,8 +1200,11 @@ function Dashboard() {
     }
     return true;
   };
-  const activeContracts = useMemo(() => enriched.filter(c => c.daysToExpiry >= 0 && matchesFilters(c)).sort((a, b) => a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0), [enriched, filterCountry, filterYear, filterMonth]);
-  const expiredContracts = useMemo(() => enriched.filter(c => c.daysToExpiry < 0 && matchesFilters(c)).sort((a, b) => a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0), [enriched, filterCountry, filterYear, filterMonth]);
+  const byContractName = (a, b) => (a.contractName || "").localeCompare(b.contractName || "", undefined, {
+    sensitivity: "base"
+  });
+  const activeContracts = useMemo(() => enriched.filter(c => c.daysToExpiry >= 0 && matchesFilters(c)).sort(byContractName), [enriched, filterCountry, filterYear, filterMonth]);
+  const expiredContracts = useMemo(() => enriched.filter(c => c.daysToExpiry < 0 && matchesFilters(c)).sort(byContractName), [enriched, filterCountry, filterYear, filterMonth]);
   const stats = useMemo(() => {
     const active = enriched.filter(c => c.daysToExpiry >= 0).length;
     const expiringSoon = enriched.filter(c => c.daysToExpiry >= 0 && c.daysToExpiry <= 60).length;
