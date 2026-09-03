@@ -141,14 +141,11 @@ under `gvm_auth_session` and silently refreshed before it expires.
   real date via a native `<input type="date">`.
 - The top-level **"Upcoming PM Checks"** section shows **every** pending,
   dated PM check across all contracts, soonest first — no cap. Each
-  **contract card's own** "PM SCHEDULE" mini-list still only ever shows its
-  **next 2** pending checks (not the full per-contract list) — that part is
-  intentional, not a bug or a missing "show more." It also shows one extra
-  row above those two, labeled **LAST**, for the most recently completed
-  check on that contract (by date, not schedule order) — its date stays
-  editable, and admins get an "Undo" button there instead of "Done" to flip
-  it back to pending. If nothing has been completed yet, the LAST row is
-  simply omitted.
+  **contract card's own** "PM SCHEDULE" list shows **every** slot for that
+  contract too (not just the next couple) — completed slots labeled DONE
+  with an admin "Undo" button, the first pending slot labeled NEXT and the
+  rest THEN, each with its own editable date. Nothing is hidden or capped
+  here; a contract with a long schedule just makes for a longer card.
 - Contracts list is sorted **alphabetically by Client (contractName)**, so
   the grid reads left-to-right then top-to-bottom in alphabetical order.
 - GVMS no / Client / Address are forced UPPERCASE as you type. Region is a
