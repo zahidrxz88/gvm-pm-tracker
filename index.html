@@ -1121,6 +1121,7 @@ function Dashboard() {
     return {
       ...c,
       schedule,
+      pending,
       nextTwo,
       overdueCount,
       completedCount,
@@ -1130,7 +1131,7 @@ function Dashboard() {
   const upcomingFeed = useMemo(() => {
     const items = [];
     enriched.forEach(c => {
-      c.nextTwo.forEach(s => {
+      c.pending.forEach(s => {
         if (s.date) items.push({
           contractId: c.id,
           slotId: s.id,
@@ -1143,7 +1144,7 @@ function Dashboard() {
         });
       });
     });
-    return items.sort((a, b) => a.date < b.date ? -1 : 1).slice(0, 2);
+    return items.sort((a, b) => a.date < b.date ? -1 : 1);
   }, [enriched]);
   const exportCSV = () => {
     const escapeCsv = val => {

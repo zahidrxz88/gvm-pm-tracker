@@ -139,9 +139,11 @@ under `gvm_auth_session` and silently refreshed before it expires.
 - PM check **dates are entirely user-picked** — nothing is auto-suggested. A
   slot starts as `date: null` ("Please select a date") and the user picks the
   real date via a native `<input type="date">`.
-- The "Upcoming PM Checks" section and each contract's PM schedule only ever
-  show the **next 2** pending checks (not the full list) — this is intentional,
-  not a bug or a missing "show more."
+- The top-level **"Upcoming PM Checks"** section shows **every** pending,
+  dated PM check across all contracts, soonest first — no cap. Each
+  **contract card's own** "PM SCHEDULE" mini-list still only ever shows its
+  **next 2** pending checks (not the full per-contract list) — that part is
+  intentional, not a bug or a missing "show more."
 - Contracts list is sorted by **start date ascending**.
 - GVMS no / Client / Address are forced UPPERCASE as you type. Region is a
   country dropdown (not free text), also displayed uppercase.
