@@ -67,6 +67,16 @@ Everything lives in one Supabase table, `kv_store` (key/value, `value` is
     schedule: [ { id, date: string|null, completed: boolean }, ... ]
   }
   ```
+- `key = 'presence:<profile.id>'` → `{ email }`, one row per logged-in account,
+  used for the "who's online" avatars in the header. Each logged-in client
+  upserts its own row via `kvSet` every 10s (see the "send a 'still here'
+  heartbeat" effect in `Dashboard`) and every client polls `kvList("presence:")`
+  every 10s to read them all back. A row counts as online only if its
+  `updated_at` is within the last 25s (`PRESENCE_STALE_MS`) — there's no
+  explicit "going offline" write, closing the tab or losing network just lets
+  the row go stale and drop off. This piggybacks on the existing
+  authenticated-write / anyone-read `kv_store` RLS policies, so no schema
+  changes were needed for it.
 
 Real accounts and roles live in Supabase's own `auth.users` table plus a
 `profiles` table (`id`, `email`, `role`), and an `activity_log` table holds the
