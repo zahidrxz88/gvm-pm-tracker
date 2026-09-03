@@ -144,7 +144,8 @@ under `gvm_auth_session` and silently refreshed before it expires.
   **contract card's own** "PM SCHEDULE" mini-list still only ever shows its
   **next 2** pending checks (not the full per-contract list) — that part is
   intentional, not a bug or a missing "show more."
-- Contracts list is sorted by **start date ascending**.
+- Contracts list is sorted **alphabetically by Client (contractName)**, so
+  the grid reads left-to-right then top-to-bottom in alphabetical order.
 - GVMS no / Client / Address are forced UPPERCASE as you type. Region is a
   country dropdown (not free text), also displayed uppercase.
 - "Export CSV" button (visible to User/Admin) downloads a long-format CSV — one
