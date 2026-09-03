@@ -370,6 +370,16 @@ async function kvSet(key, value, accessToken) {
   });
   if (!res.ok) throw new Error("kvSet failed: " + res.status);
 }
+async function kvList(keyPrefix) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/kv_store?key=like.${keyPrefix}*&select=key,value,updated_at`, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`
+    }
+  });
+  if (!res.ok) throw new Error("kvList failed: " + res.status);
+  return res.json();
+}
 
 // ============ AUTH (Supabase GoTrue REST — no SDK, same hand-rolled-fetch pattern as kvGet/kvSet) ============
 const AUTH_SESSION_KEY = "gvm_auth_session";
@@ -747,6 +757,7 @@ function Dashboard() {
   const [filterCountry, setFilterCountry] = useState("");
   const [filterYear, setFilterYear] = useState("");
   const [filterMonth, setFilterMonth] = useState("");
+  const [onlineUsers, setOnlineUsers] = useState([]);
   const lastSyncedRef = useRef("");
   const sessionRef = useRef(null);
   useEffect(() => {
@@ -843,6 +854,46 @@ function Dashboard() {
     }, 10000);
     return () => clearInterval(interval);
   }, [loaded]);
+
+  // send a "still here" heartbeat every 10s while logged in, so others see us as online
+  useEffect(() => {
+    if (!profile) return;
+    let cancelled = false;
+    const beat = async () => {
+      try {
+        await kvSet(`presence:${profile.id}`, {
+          email: profile.email
+        }, sessionRef.current && sessionRef.current.accessToken);
+      } catch (e) {/* ignore transient heartbeat errors */}
+    };
+    beat();
+    const interval = setInterval(() => {
+      if (!cancelled) beat();
+    }, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [profile]);
+
+  // poll who else is online (a presence row counts as online for 25s after its last heartbeat)
+  useEffect(() => {
+    const PRESENCE_STALE_MS = 25000;
+    const fetchPresence = async () => {
+      try {
+        const rows = await kvList("presence:");
+        const now = Date.now();
+        const online = rows.filter(r => now - new Date(r.updated_at).getTime() < PRESENCE_STALE_MS).map(r => ({
+          id: r.key.slice("presence:".length),
+          email: r.value && r.value.email
+        })).filter(u => u.email);
+        setOnlineUsers(online);
+      } catch (e) {/* ignore transient poll errors */}
+    };
+    fetchPresence();
+    const interval = setInterval(fetchPresence, 10000);
+    return () => clearInterval(interval);
+  }, []);
   const openAdd = () => {
     if (!isAdmin) return;
     setForm(emptyForm);
@@ -1070,6 +1121,7 @@ function Dashboard() {
     return {
       ...c,
       schedule,
+      pending,
       nextTwo,
       overdueCount,
       completedCount,
@@ -1079,7 +1131,7 @@ function Dashboard() {
   const upcomingFeed = useMemo(() => {
     const items = [];
     enriched.forEach(c => {
-      c.nextTwo.forEach(s => {
+      c.pending.forEach(s => {
         if (s.date) items.push({
           contractId: c.id,
           slotId: s.id,
@@ -1092,7 +1144,7 @@ function Dashboard() {
         });
       });
     });
-    return items.sort((a, b) => a.date < b.date ? -1 : 1).slice(0, 2);
+    return items.sort((a, b) => a.date < b.date ? -1 : 1);
   }, [enriched]);
   const exportCSV = () => {
     const escapeCsv = val => {
@@ -1198,7 +1250,32 @@ function Dashboard() {
       color: "#8B948E",
       marginTop: 5
     }
-  }, "A RICOH COMPANY")), /*#__PURE__*/React.createElement("div", {
+  }, "A RICOH COMPANY")), onlineUsers.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      flexWrap: "wrap"
+    }
+  }, onlineUsers.map(u => /*#__PURE__*/React.createElement("div", {
+    key: u.id,
+    title: `${u.email} · online`,
+    className: "mono jack-glow",
+    style: {
+      width: 28,
+      height: 28,
+      borderRadius: "50%",
+      background: "#12251C",
+      border: "1px solid #4ADE9C",
+      color: "#4ADE9C",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontSize: 13,
+      fontWeight: 700,
+      flexShrink: 0
+    }
+  }, u.email[0].toUpperCase()))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
