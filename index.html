@@ -1113,6 +1113,8 @@ function Dashboard() {
     }));
     const pending = schedule.filter(s => !s.completed);
     const nextTwo = pending.slice(0, 2);
+    const completedSlots = schedule.filter(s => s.completed && s.date);
+    const mostRecentCompleted = completedSlots.length === 0 ? null : completedSlots.reduce((latest, s) => s.date > latest.date ? s : latest);
     const overdueCount = schedule.filter(s => s.status === "overdue").length;
     const completedCount = schedule.filter(s => s.completed).length;
     const today = parseD(todayStr());
@@ -1123,6 +1125,7 @@ function Dashboard() {
       schedule,
       pending,
       nextTwo,
+      mostRecentCompleted,
       overdueCount,
       completedCount,
       daysToExpiry
@@ -2297,7 +2300,64 @@ function ContractCard({
       color: "#8B948E",
       marginBottom: 8
     }
-  }, "PM SCHEDULE · ", c.completedCount, "/", c.schedule.length, " COMPLETE"), c.nextTwo.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, "PM SCHEDULE · ", c.completedCount, "/", c.schedule.length, " COMPLETE"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gap: 10
+    }
+  }, c.mostRecentCompleted && /*#__PURE__*/React.createElement("div", {
+    key: c.mostRecentCompleted.id
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "jack jack-glow",
+    style: {
+      background: STATUS_COLOR.done,
+      color: STATUS_COLOR.done
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "mono",
+    style: {
+      fontSize: 12,
+      color: "#8B948E"
+    }
+  }, "LAST"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: c.mostRecentCompleted.date || "",
+    onChange: e => onSetDate(c.id, c.mostRecentCompleted.id, e.target.value),
+    onClick: e => {
+      if (e.target.showPicker) {
+        try {
+          e.target.showPicker();
+        } catch (err) {}
+      }
+    },
+    style: dateInputStyle
+  })), isAdmin && /*#__PURE__*/React.createElement("button", {
+    onClick: () => onToggleDone(c.id, c.mostRecentCompleted.id),
+    title: "Undo — mark as not yet done",
+    style: {
+      background: "transparent",
+      border: "1px solid #262B27",
+      borderRadius: 6,
+      padding: "5px 9px",
+      color: "#8B948E",
+      fontSize: 13,
+      flexShrink: 0
+    }
+  }, "Undo"))), c.nextTwo.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -2307,12 +2367,7 @@ function ContractCard({
     }
   }, /*#__PURE__*/React.createElement(CheckCircle2, {
     size: 13
-  }), " All PM checks completed") : /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gap: 10
-    }
-  }, c.nextTwo.map((s, i) => /*#__PURE__*/React.createElement("div", {
+  }), " All PM checks completed") : c.nextTwo.map((s, i) => /*#__PURE__*/React.createElement("div", {
     key: s.id
   }, /*#__PURE__*/React.createElement("div", {
     style: {
