@@ -679,6 +679,43 @@ const emptyForm = {
   frequency: "4"
 };
 const COUNTRIES = ["Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Antigua and Barbuda", "Argentina", "Armenia", "Australia", "Austria", "Azerbaijan", "Bahamas", "Bahrain", "Bangladesh", "Barbados", "Belarus", "Belgium", "Belize", "Benin", "Bhutan", "Bolivia", "Bosnia and Herzegovina", "Botswana", "Brazil", "Brunei", "Bulgaria", "Burkina Faso", "Burundi", "Cabo Verde", "Cambodia", "Cameroon", "Canada", "Central African Republic", "Chad", "Chile", "China", "Colombia", "Comoros", "Congo (Brazzaville)", "Congo (Kinshasa)", "Costa Rica", "Croatia", "Cuba", "Cyprus", "Czechia", "Denmark", "Djibouti", "Dominica", "Dominican Republic", "Ecuador", "Egypt", "El Salvador", "Equatorial Guinea", "Eritrea", "Estonia", "Eswatini", "Ethiopia", "Fiji", "Finland", "France", "Gabon", "Gambia", "Georgia", "Germany", "Ghana", "Greece", "Grenada", "Guatemala", "Guinea", "Guinea-Bissau", "Guyana", "Haiti", "Honduras", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Israel", "Italy", "Ivory Coast", "Jamaica", "Japan", "Jordan", "Kazakhstan", "Kenya", "Kiribati", "Kosovo", "Kuwait", "Kyrgyzstan", "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia", "Libya", "Liechtenstein", "Lithuania", "Luxembourg", "Madagascar", "Malawi", "Malaysia", "Maldives", "Mali", "Malta", "Marshall Islands", "Mauritania", "Mauritius", "Mexico", "Micronesia", "Moldova", "Monaco", "Mongolia", "Montenegro", "Morocco", "Mozambique", "Myanmar", "Namibia", "Nauru", "Nepal", "Netherlands", "New Zealand", "Nicaragua", "Niger", "Nigeria", "North Korea", "North Macedonia", "Norway", "Oman", "Pakistan", "Palau", "Palestine", "Panama", "Papua New Guinea", "Paraguay", "Peru", "Philippines", "Poland", "Portugal", "Qatar", "Romania", "Russia", "Rwanda", "Saint Kitts and Nevis", "Saint Lucia", "Saint Vincent and the Grenadines", "Samoa", "San Marino", "Sao Tome and Principe", "Saudi Arabia", "Senegal", "Serbia", "Seychelles", "Sierra Leone", "Singapore", "Slovakia", "Slovenia", "Solomon Islands", "Somalia", "South Africa", "South Korea", "South Sudan", "Spain", "Sri Lanka", "Sudan", "Suriname", "Sweden", "Switzerland", "Syria", "Taiwan", "Tajikistan", "Tanzania", "Thailand", "Timor-Leste", "Togo", "Tonga", "Trinidad and Tobago", "Tunisia", "Turkey", "Turkmenistan", "Tuvalu", "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom", "United States", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela", "Vietnam", "Yemen", "Zambia", "Zimbabwe"];
+const MONTHS = [{
+  value: "01",
+  label: "January"
+}, {
+  value: "02",
+  label: "February"
+}, {
+  value: "03",
+  label: "March"
+}, {
+  value: "04",
+  label: "April"
+}, {
+  value: "05",
+  label: "May"
+}, {
+  value: "06",
+  label: "June"
+}, {
+  value: "07",
+  label: "July"
+}, {
+  value: "08",
+  label: "August"
+}, {
+  value: "09",
+  label: "September"
+}, {
+  value: "10",
+  label: "October"
+}, {
+  value: "11",
+  label: "November"
+}, {
+  value: "12",
+  label: "December"
+}];
 function Dashboard() {
   const [contracts, setContracts] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -707,6 +744,9 @@ function Dashboard() {
   const isUser = role === "user" || isAdmin;
   const roleLabel = role.replace("_", " ").toUpperCase();
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [filterCountry, setFilterCountry] = useState("");
+  const [filterYear, setFilterYear] = useState("");
+  const [filterMonth, setFilterMonth] = useState("");
   const lastSyncedRef = useRef("");
   const sessionRef = useRef(null);
   useEffect(() => {
@@ -1080,8 +1120,36 @@ function Dashboard() {
     a.click();
     URL.revokeObjectURL(url);
   };
-  const activeContracts = useMemo(() => enriched.filter(c => c.daysToExpiry >= 0).sort((a, b) => a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0), [enriched]);
-  const expiredContracts = useMemo(() => enriched.filter(c => c.daysToExpiry < 0).sort((a, b) => a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0), [enriched]);
+  const countryOptions = useMemo(() => {
+    const set = new Set();
+    contracts.forEach(c => {
+      if (c.region) set.add(c.region);
+    });
+    return Array.from(set).sort();
+  }, [contracts]);
+  const yearOptions = useMemo(() => {
+    const set = new Set();
+    contracts.forEach(c => (c.schedule || []).forEach(s => {
+      if (s.date) set.add(s.date.slice(0, 4));
+    }));
+    return Array.from(set).sort();
+  }, [contracts]);
+  const matchesFilters = c => {
+    if (filterCountry && c.region !== filterCountry) return false;
+    if (filterYear || filterMonth) {
+      const hasMatch = (c.schedule || []).some(s => {
+        if (!s.date) return false;
+        const [y, m] = s.date.split("-");
+        if (filterYear && y !== filterYear) return false;
+        if (filterMonth && m !== filterMonth) return false;
+        return true;
+      });
+      if (!hasMatch) return false;
+    }
+    return true;
+  };
+  const activeContracts = useMemo(() => enriched.filter(c => c.daysToExpiry >= 0 && matchesFilters(c)).sort((a, b) => a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0), [enriched, filterCountry, filterYear, filterMonth]);
+  const expiredContracts = useMemo(() => enriched.filter(c => c.daysToExpiry < 0 && matchesFilters(c)).sort((a, b) => a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0), [enriched, filterCountry, filterYear, filterMonth]);
   const stats = useMemo(() => {
     const active = enriched.filter(c => c.daysToExpiry >= 0).length;
     const expiringSoon = enriched.filter(c => c.daysToExpiry >= 0 && c.daysToExpiry <= 60).length;
@@ -1350,11 +1418,85 @@ function Dashboard() {
         color: "#6E9FB0"
       }
     }, " · ", item.region.toUpperCase())));
-  }))), /*#__PURE__*/React.createElement("section", null, /*#__PURE__*/React.createElement(SectionHeader, {
+  }))), /*#__PURE__*/React.createElement("section", {
+    style: {
+      marginBottom: 24
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexWrap: "wrap",
+      alignItems: "center",
+      gap: 12
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "mono",
+    style: {
+      fontSize: 12,
+      letterSpacing: 1,
+      color: "#8B948E"
+    }
+  }, "FILTER"), /*#__PURE__*/React.createElement("select", {
+    value: filterCountry,
+    onChange: e => setFilterCountry(e.target.value),
+    style: {
+      ...selectStyle,
+      width: "auto",
+      padding: "8px 10px",
+      fontSize: 14
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "All countries"), countryOptions.map(r => /*#__PURE__*/React.createElement("option", {
+    key: r,
+    value: r
+  }, r.toUpperCase()))), /*#__PURE__*/React.createElement("select", {
+    value: filterYear,
+    onChange: e => setFilterYear(e.target.value),
+    style: {
+      ...selectStyle,
+      width: "auto",
+      padding: "8px 10px",
+      fontSize: 14
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "All years"), yearOptions.map(y => /*#__PURE__*/React.createElement("option", {
+    key: y,
+    value: y
+  }, y))), /*#__PURE__*/React.createElement("select", {
+    value: filterMonth,
+    onChange: e => setFilterMonth(e.target.value),
+    style: {
+      ...selectStyle,
+      width: "auto",
+      padding: "8px 10px",
+      fontSize: 14
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "All months"), MONTHS.map(m => /*#__PURE__*/React.createElement("option", {
+    key: m.value,
+    value: m.value
+  }, m.label))), (filterCountry || filterYear || filterMonth) && /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setFilterCountry("");
+      setFilterYear("");
+      setFilterMonth("");
+    },
+    style: {
+      background: "none",
+      border: "1px solid #262B27",
+      borderRadius: 6,
+      padding: "7px 10px",
+      color: "#8B948E",
+      fontSize: 13
+    }
+  }, "Clear filters"))), /*#__PURE__*/React.createElement("section", null, /*#__PURE__*/React.createElement(SectionHeader, {
     title: "Contracts",
     sub: `${activeContracts.length} on file`
   }), activeContracts.length === 0 ? /*#__PURE__*/React.createElement(EmptyRow, {
-    text: contracts.length === 0 ? "No service contracts yet." : "No active contracts."
+    text: contracts.length === 0 ? "No service contracts yet." : filterCountry || filterYear || filterMonth ? "No contracts match the selected filters." : "No active contracts."
   }) : /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
