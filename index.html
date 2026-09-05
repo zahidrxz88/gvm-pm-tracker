@@ -516,8 +516,6 @@ const ACTIVITY_LABELS = {
   contract_edit: "Edited contract",
   contract_delete: "Deleted contract",
   pm_date_set: "Set PM check date",
-  pm_check_done: "Marked PM check done",
-  pm_check_undone: "Reopened PM check",
   role_change: "Changed a user's role"
 };
 
@@ -643,18 +641,16 @@ function computeSlotCount(contract) {
   return Math.max(1, Math.round(years * Number(frequency)));
 }
 function slotStatus(slot) {
-  if (slot.completed) return "done";
   if (!slot.date) return "unselected";
   const today = parseD(todayStr());
   const d = parseD(slot.date);
   const diff = daysBetween(today, d);
-  if (diff < 0) return "overdue";
+  if (slot.completed || diff < 0) return "done";
   if (diff <= 30) return "due-soon";
   return "scheduled";
 }
 const STATUS_COLOR = {
   done: "#4ADE9C",
-  overdue: "#F2545B",
   "due-soon": "#F5A623",
   scheduled: "#3A423C",
   unselected: "#F5A623"
@@ -1089,31 +1085,13 @@ function Dashboard() {
       date: dateStr || null
     });
   };
-  const toggleSlotDone = (contractId, slotId) => {
-    if (!isAdmin) return;
-    const contract = contracts.find(c => c.id === contractId);
-    const slot = contract && contract.schedule.find(s => s.id === slotId);
-    const willComplete = slot ? !slot.completed : true;
-    setContracts(cs => cs.map(c => c.id !== contractId ? c : {
-      ...c,
-      schedule: c.schedule.map(s => s.id === slotId ? {
-        ...s,
-        completed: !s.completed
-      } : s)
-    }));
-    logActivity(sessionRef.current && sessionRef.current.accessToken, profile.email, willComplete ? "pm_check_done" : "pm_check_undone", {
-      contractId,
-      slotId
-    });
-  };
   const enriched = useMemo(() => contracts.map(c => {
     const schedule = (c.schedule || []).map(s => ({
       ...s,
       status: slotStatus(s)
     }));
-    const pending = schedule.filter(s => !s.completed);
-    const overdueCount = schedule.filter(s => s.status === "overdue").length;
-    const completedCount = schedule.filter(s => s.completed).length;
+    const pending = schedule.filter(s => s.status !== "done");
+    const completedCount = schedule.filter(s => s.status === "done").length;
     const today = parseD(todayStr());
     const end = parseD(c.endDate);
     const daysToExpiry = daysBetween(today, end);
@@ -1121,7 +1099,6 @@ function Dashboard() {
       ...c,
       schedule,
       pending,
-      overdueCount,
       completedCount,
       daysToExpiry
     };
@@ -1155,7 +1132,7 @@ function Dashboard() {
         rows.push([c.vendor, c.contractName, c.rooms, c.region, c.startDate, c.endDate, freqLabelFor(c.frequency), "", "", ""]);
       } else {
         c.schedule.forEach(s => {
-          rows.push([c.vendor, c.contractName, c.rooms, c.region, c.startDate, c.endDate, freqLabelFor(c.frequency), s.date || "Not yet scheduled", s.status, s.completed ? "Yes" : "No"]);
+          rows.push([c.vendor, c.contractName, c.rooms, c.region, c.startDate, c.endDate, freqLabelFor(c.frequency), s.date || "Not yet scheduled", s.status, s.status === "done" ? "Yes" : "No"]);
         });
       }
     });
@@ -1570,8 +1547,7 @@ function Dashboard() {
     isUser: isUser,
     onEdit: () => openEdit(c),
     onDelete: () => setConfirmDelete(c.id),
-    onSetDate: setSlotDate,
-    onToggleDone: toggleSlotDone
+    onSetDate: setSlotDate
   })))), expiredContracts.length > 0 && /*#__PURE__*/React.createElement("section", {
     style: {
       marginTop: 40
@@ -1592,8 +1568,7 @@ function Dashboard() {
     isUser: isUser,
     onEdit: () => openEdit(c),
     onDelete: () => setConfirmDelete(c.id),
-    onSetDate: setSlotDate,
-    onToggleDone: toggleSlotDone
+    onSetDate: setSlotDate
   }))))), modalOpen && /*#__PURE__*/React.createElement(Modal, {
     onClose: () => setModalOpen(false)
   }, /*#__PURE__*/React.createElement("h2", {
@@ -2137,14 +2112,13 @@ function ContractCard({
   isUser,
   onEdit,
   onDelete,
-  onSetDate,
-  onToggleDone
+  onSetDate
 }) {
   const expired = c.daysToExpiry < 0;
   const expiringSoon = !expired && c.daysToExpiry <= 60;
-  const ledColor = expired ? "#F2545B" : c.overdueCount > 0 ? "#F2545B" : expiringSoon ? "#F5A623" : "#4ADE9C";
+  const ledColor = expired ? "#F2545B" : expiringSoon ? "#F5A623" : "#4ADE9C";
   const freqLabel = freqLabelFor(c.frequency);
-  const firstPendingIndex = c.schedule.findIndex(s => !s.completed);
+  const firstPendingIndex = c.schedule.findIndex(s => s.status !== "done");
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#0E1210",
@@ -2289,13 +2263,6 @@ function ContractCard({
     style: {
       display: "flex",
       alignItems: "center",
-      justifyContent: "space-between",
-      gap: 8
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
       gap: 8,
       minWidth: 0
     }
@@ -2311,7 +2278,7 @@ function ContractCard({
       fontSize: 12,
       color: "#8B948E"
     }
-  }, s.completed ? "DONE" : i === firstPendingIndex ? "NEXT" : "THEN"), /*#__PURE__*/React.createElement("input", {
+  }, s.status === "done" ? "DONE" : i === firstPendingIndex ? "NEXT" : "THEN"), /*#__PURE__*/React.createElement("input", {
     type: "date",
     value: s.date || "",
     onChange: e => onSetDate(c.id, s.id, e.target.value),
@@ -2323,39 +2290,7 @@ function ContractCard({
       }
     },
     style: dateInputStyle
-  })), isAdmin && (s.completed ? /*#__PURE__*/React.createElement("button", {
-    onClick: () => onToggleDone(c.id, s.id),
-    title: "Undo — mark as not yet done",
-    style: {
-      background: "transparent",
-      border: "1px solid #262B27",
-      borderRadius: 6,
-      padding: "5px 9px",
-      color: "#8B948E",
-      fontSize: 13,
-      flexShrink: 0
-    }
-  }, "Undo") : /*#__PURE__*/React.createElement("button", {
-    onClick: () => onToggleDone(c.id, s.id),
-    disabled: !s.date,
-    title: s.date ? "Mark complete" : "Select a date first",
-    style: {
-      background: "transparent",
-      border: "1px solid #262B27",
-      borderRadius: 6,
-      padding: "5px 9px",
-      color: s.date ? "#4ADE9C" : "#3A423C",
-      display: "flex",
-      alignItems: "center",
-      gap: 5,
-      fontSize: 13,
-      opacity: s.date ? 1 : 0.6,
-      cursor: s.date ? "pointer" : "not-allowed",
-      flexShrink: 0
-    }
-  }, /*#__PURE__*/React.createElement(CheckCircle2, {
-    size: 12
-  }), " Done"))), !s.completed && !s.date && /*#__PURE__*/React.createElement("div", {
+  })), s.status !== "done" && !s.date && /*#__PURE__*/React.createElement("div", {
     style: {
       color: "#F5A623",
       fontSize: 13,

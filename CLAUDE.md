@@ -101,14 +101,14 @@ under `gvm_auth_session` and silently refreshed before it expires.
 - **Guest** (no login): view-only. Cannot see PM schedule dates at all,
   cannot add/edit/delete contracts, cannot see the "Upcoming PM Checks" section.
 - **User** (self-signup default): can view + set/change PM check dates. Cannot
-  mark a check "Done", cannot add/edit/delete contracts.
-- **Admin**: full access — add/edit/delete contracts, mark checks Done.
+  add/edit/delete contracts.
+- **Admin**: full access — add/edit/delete contracts.
 - **Super admin** (locked to `zahidrxz@gmail.com`, enforced in `setup.sql` via
   `is_locked_super_admin()` — not just client-side): everything Admin can do,
   plus the **Manage Users** panel (assign `user`/`admin` roles — only the
   super admin can do this, enforced by an RLS policy, not just hidden UI) and
   the **Activity Log** panel (read-only audit trail of logins/logouts,
-  contract changes, PM date/done changes, and role changes — also RLS-gated to
+  contract changes, PM date changes, and role changes — also RLS-gated to
   super admin only, so the query returns rows for nobody else).
 - Anyone can self-sign-up (email + password) and starts as `user`. The role
   actually enforced comes from the `profiles.role` column server-side (via
@@ -139,13 +139,19 @@ under `gvm_auth_session` and silently refreshed before it expires.
 - PM check **dates are entirely user-picked** — nothing is auto-suggested. A
   slot starts as `date: null` ("Please select a date") and the user picks the
   real date via a native `<input type="date">`.
+- **There is no manual "mark as done" action anymore** (the Done/Undo buttons
+  were removed — they invited accidental clicks). A slot's status is derived
+  purely in `slotStatus()`: no date → "unselected"; date in the past (or the
+  legacy `completed` flag from before this change) → "done"; date within 30
+  days → "due-soon"; otherwise → "scheduled". To fix a mistaken date, just
+  edit the date field directly — there's no separate completion step to undo.
 - The top-level **"Upcoming PM Checks"** section shows **every** pending,
   dated PM check across all contracts, soonest first — no cap. Each
   **contract card's own** "PM SCHEDULE" list shows **every** slot for that
-  contract too (not just the next couple) — completed slots labeled DONE
-  with an admin "Undo" button, the first pending slot labeled NEXT and the
-  rest THEN, each with its own editable date. Nothing is hidden or capped
-  here; a contract with a long schedule just makes for a longer card.
+  contract too (not just the next couple) — done slots labeled DONE, the
+  first non-done slot labeled NEXT, the rest THEN, each with its own editable
+  date and no buttons. Nothing is hidden or capped here; a contract with a
+  long schedule just makes for a longer card.
 - Contracts list is sorted **alphabetically by Client (contractName)**, so
   the grid reads left-to-right then top-to-bottom in alphabetical order.
 - GVMS no / Client / Address are forced UPPERCASE as you type. Region is a
