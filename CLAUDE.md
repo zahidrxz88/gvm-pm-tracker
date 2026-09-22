@@ -159,17 +159,15 @@ under `gvm_auth_session` and silently refreshed before it expires.
 - "Export CSV" button (visible to User/Admin) downloads a long-format CSV — one
   row per PM check occurrence — for monthly reporting. No xlsx library is used;
   it's a hand-built CSV string, which Excel/Sheets both open fine.
-- "Import CSV" button (Admin only, next to Export CSV) is the reverse: pick a
-  CSV in that same exported format and it **replaces every contract
-  currently in the system** with the ones parsed from the file, after a
-  confirmation modal. It's meant for restoring from a backup, not merging —
-  there's no partial/merge import. `contractsFromCSV()` groups rows by
-  vendor+client+address+region+start+end+SLA back into one contract per
-  group, reconstructing `schedule` from the Check Date/Completed columns
-  (a blank Check Date means that contract had zero PM slots; "Not yet
-  scheduled" means a slot with `date: null`). Hand-rolled RFC4180-ish CSV
-  parser (`parseCSVRows`) — no library — since quoted fields with embedded
-  commas/newlines need real parsing, not `split(",")`.
+- "Export JSON" / "Import JSON" buttons (**super admin only**, next to Export
+  CSV) are the actual backup/restore pair — Export CSV is for human reports,
+  not restoring. Export JSON downloads `contracts` verbatim
+  (`JSON.stringify(contracts, null, 2)`), so a restore is lossless — no
+  parsing/reconstruction needed. Import JSON picks a `.json` file, requires
+  it to parse to a non-empty array, shows a confirmation modal (contract
+  counts + filename), then on confirm **replaces every contract currently in
+  the system** with the file's contents — it's a full restore, not a merge,
+  and there's no undo. Logged to the activity log as `contracts_import`.
 - Currently **dark theme** (a light theme was tried and explicitly reverted —
   don't reintroduce it without being asked).
 - All font sizes were deliberately bumped +2px from the original design at the

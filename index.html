@@ -686,101 +686,6 @@ function freqLabelFor(frequency) {
   }[frequency] || `${frequency} times per year`;
 }
 const uid = () => Math.random().toString(36).slice(2, 10);
-
-// ============ CSV import (reverse of exportCSV, for restoring a backup) ============
-function parseCSVRows(text) {
-  const rows = [];
-  let row = [];
-  let field = "";
-  let inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"') {
-        if (text[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else inQuotes = false;
-      } else field += c;
-    } else if (c === '"') {
-      inQuotes = true;
-    } else if (c === ",") {
-      row.push(field);
-      field = "";
-    } else if (c === "\n" || c === "\r") {
-      if (c === "\r" && text[i + 1] === "\n") i++;
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = "";
-    } else field += c;
-  }
-  if (field.length > 0 || row.length > 0) {
-    row.push(field);
-    rows.push(row);
-  }
-  return rows.filter(r => !(r.length === 1 && r[0] === ""));
-}
-function parseFrequencyLabel(label) {
-  const m = /^(\d+)\s+times?\s+per\s+year$/i.exec((label || "").trim());
-  return m ? Number(m[1]) : 4;
-}
-function contractsFromCSV(text) {
-  const rows = parseCSVRows(text);
-  if (rows.length === 0) return [];
-  const header = rows[0].map(h => h.trim());
-  const idx = name => header.indexOf(name);
-  const cols = {
-    vendor: idx("GVMS No"),
-    client: idx("Client"),
-    address: idx("Address"),
-    region: idx("Region"),
-    start: idx("Contract Start"),
-    end: idx("Contract End"),
-    sla: idx("SLA"),
-    date: idx("Check Date"),
-    completed: idx("Completed")
-  };
-  if (Object.values(cols).some(i => i === -1)) {
-    throw new Error("This doesn't look like a GVM PM Tracker export — missing expected columns.");
-  }
-  const groups = new Map();
-  const order = [];
-  for (let r = 1; r < rows.length; r++) {
-    const row = rows[r];
-    const key = [row[cols.vendor], row[cols.client], row[cols.address], row[cols.region], row[cols.start], row[cols.end], row[cols.sla]].join("|||");
-    if (!groups.has(key)) {
-      groups.set(key, {
-        id: uid(),
-        vendor: row[cols.vendor] || "",
-        contractName: row[cols.client] || "",
-        rooms: row[cols.address] || "",
-        region: row[cols.region] || "",
-        startDate: row[cols.start] || "",
-        endDate: row[cols.end] || "",
-        frequency: parseFrequencyLabel(row[cols.sla]),
-        schedule: []
-      });
-      order.push(key);
-    }
-    const contract = groups.get(key);
-    const dateVal = (row[cols.date] || "").trim();
-    if (dateVal && dateVal !== "Not yet scheduled") {
-      contract.schedule.push({
-        id: uid(),
-        date: dateVal,
-        completed: (row[cols.completed] || "").trim().toLowerCase() === "yes"
-      });
-    } else if (dateVal === "Not yet scheduled") {
-      contract.schedule.push({
-        id: uid(),
-        date: null,
-        completed: false
-      });
-    }
-  }
-  return order.map(k => groups.get(k));
-}
 const emptyForm = {
   vendor: "",
   contractName: "",
@@ -1256,8 +1161,21 @@ function Dashboard() {
     a.click();
     URL.revokeObjectURL(url);
   };
+  const exportJSON = () => {
+    if (!isSuperAdmin) return;
+    const json = JSON.stringify(contracts, null, 2);
+    const blob = new Blob([json], {
+      type: "application/json"
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `GVM-PM-Backup-${todayStr()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
   const openImportPicker = () => {
-    if (!isAdmin) return;
+    if (!isSuperAdmin) return;
     setImportError("");
     if (fileInputRef.current) fileInputRef.current.click();
   };
@@ -1268,9 +1186,9 @@ function Dashboard() {
     setImportError("");
     try {
       const text = await file.text();
-      const parsed = contractsFromCSV(text);
-      if (parsed.length === 0) {
-        setImportError("No contracts found in that file.");
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        setImportError("That file doesn't contain a contracts backup (expected a JSON array).");
         return;
       }
       setImportPreview({
@@ -1278,7 +1196,7 @@ function Dashboard() {
         fileName: file.name
       });
     } catch (err) {
-      setImportError(err.message || "Could not read that file.");
+      setImportError("Could not read that file — make sure it's a JSON backup exported from this app.");
     }
   };
   const confirmImport = () => {
@@ -1480,10 +1398,26 @@ function Dashboard() {
     }
   }, /*#__PURE__*/React.createElement(Download, {
     size: 16
-  }), " Export CSV"), isAdmin && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("input", {
+  }), " Export CSV"), isSuperAdmin && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+    onClick: exportJSON,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      background: "transparent",
+      color: "#E8ECE9",
+      border: "1px solid #262B27",
+      borderRadius: 8,
+      padding: "12px 18px",
+      fontWeight: 600,
+      fontSize: 16
+    }
+  }, /*#__PURE__*/React.createElement(Download, {
+    size: 16
+  }), " Export JSON"), /*#__PURE__*/React.createElement("input", {
     ref: fileInputRef,
     type: "file",
-    accept: ".csv",
+    accept: ".json",
     onChange: handleImportFile,
     style: {
       display: "none"
@@ -1504,7 +1438,7 @@ function Dashboard() {
     }
   }, /*#__PURE__*/React.createElement(Upload, {
     size: 16
-  }), " Import CSV")), importError && /*#__PURE__*/React.createElement("span", {
+  }), " Import JSON")), importError && /*#__PURE__*/React.createElement("span", {
     style: {
       color: "#F2545B",
       fontSize: 13
