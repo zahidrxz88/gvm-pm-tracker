@@ -159,6 +159,17 @@ under `gvm_auth_session` and silently refreshed before it expires.
 - "Export CSV" button (visible to User/Admin) downloads a long-format CSV — one
   row per PM check occurrence — for monthly reporting. No xlsx library is used;
   it's a hand-built CSV string, which Excel/Sheets both open fine.
+- "Import CSV" button (Admin only, next to Export CSV) is the reverse: pick a
+  CSV in that same exported format and it **replaces every contract
+  currently in the system** with the ones parsed from the file, after a
+  confirmation modal. It's meant for restoring from a backup, not merging —
+  there's no partial/merge import. `contractsFromCSV()` groups rows by
+  vendor+client+address+region+start+end+SLA back into one contract per
+  group, reconstructing `schedule` from the Check Date/Completed columns
+  (a blank Check Date means that contract had zero PM slots; "Not yet
+  scheduled" means a slot with `date: null`). Hand-rolled RFC4180-ish CSV
+  parser (`parseCSVRows`) — no library — since quoted fields with embedded
+  commas/newlines need real parsing, not `split(",")`.
 - Currently **dark theme** (a light theme was tried and explicitly reverted —
   don't reintroduce it without being asked).
 - All font sizes were deliberately bumped +2px from the original design at the
